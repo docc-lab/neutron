@@ -32,6 +32,7 @@ from oslo_service import loopingcall
 from oslo_utils import fileutils
 from oslo_utils import importutils
 import six
+from osprofiler import profiler
 
 from neutron._i18n import _
 from neutron.agent.common import resource_processing_queue as queue
@@ -520,6 +521,7 @@ class DhcpAgent(manager.Manager):
             method = getattr(self, update.action)
             method(update.resource)
 
+    @profiler.disable_tracing
     def port_update_end(self, context, payload):
         """Handle the port.update.end notification event."""
         updated_port = dhcp.DictModel(payload['port'])
@@ -577,6 +579,7 @@ class DhcpAgent(manager.Manager):
             port['network_id'], self.conf.host)
         return port['device_id'] == thishost
 
+    @profiler.disable_tracing
     def port_create_end(self, context, payload):
         """Handle the port.create.end notification event."""
         created_port = dhcp.DictModel(payload['port'])
@@ -608,6 +611,7 @@ class DhcpAgent(manager.Manager):
                 return
         self.reload_allocations(created_port, network)
 
+    @profiler.disable_tracing
     def port_delete_end(self, context, payload):
         """Handle the port.delete.end notification event."""
         network_id = self._get_network_lock_id(payload)
