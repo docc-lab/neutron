@@ -250,6 +250,7 @@ class NeutronManager(object):
         if not cls.has_instance():
             cls._instance = cls()
 
+    @profiler.disable_tracing
     @classmethod
     def has_instance(cls):
         return cls._instance is not None
@@ -258,6 +259,7 @@ class NeutronManager(object):
     def clear_instance(cls):
         cls._instance = None
 
+    @profiler.disable_tracing
     @classmethod
     def get_instance(cls):
         # double checked locking
@@ -277,6 +279,7 @@ class NeutronManager(object):
     def set_controller_for_resource(cls, resource, controller):
         cls.get_instance().resource_controller_mappings[resource] = controller
 
+    @profiler.disable_tracing
     @classmethod
     def get_controller_for_resource(cls, resource):
         resource = resource.replace('_', '-')
