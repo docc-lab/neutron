@@ -294,7 +294,7 @@ class ConjIPFlowManager(object):
         addr_to_conj = collections.defaultdict(list)
         for remote_id, conj_id_set in sg_conj_id_map.items():
             remote_group = self.driver.sg_port_map.get_sg(remote_id)
-            if not remote_group:
+            if not remote_group or not remote_group.ports:
                 LOG.debug('No member for SG %s', remote_id)
                 continue
             for addr in remote_group.get_ethertype_filtered_addresses(
@@ -551,14 +551,23 @@ class OVSFirewallDriver(firewall.FirewallDriver):
             self._initialize_egress_no_port_security(port['device'])
             return
 
-        old_of_port = self.get_ofport(port)
-        of_port = self.get_or_create_ofport(port)
-        if old_of_port:
-            LOG.info("Initializing port %s that was already initialized.",
-                     port['device'])
-            self._update_flows_for_port(of_port, old_of_port)
-        else:
-            self._set_port_filters(of_port)
+        try:
+            old_of_port = self.get_ofport(port)
+            of_port = self.get_or_create_ofport(port)
+            if old_of_port:
+                LOG.info("Initializing port %s that was already initialized.",
+                         port['device'])
+                self._update_flows_for_port(of_port, old_of_port)
+            else:
+                self._set_port_filters(of_port)
+        except exceptions.OVSFWPortNotFound as not_found_error:
+            LOG.info("port %(port_id)s does not exist in ovsdb: %(err)s.",
+                     {'port_id': port['device'],
+                      'err': not_found_error})
+        except exceptions.OVSFWTagNotFound as tag_not_found:
+            LOG.info("Tag was not found for port %(port_id)s: %(err)s.",
+                     {'port_id': port['device'],
+                      'err': tag_not_found})
 
     def update_port_filter(self, port):
         """Update rules for given port
@@ -594,6 +603,9 @@ class OVSFirewallDriver(firewall.FirewallDriver):
             LOG.info("port %(port_id)s does not exist in ovsdb: %(err)s.",
                      {'port_id': port['device'],
                       'err': not_found_error})
+            # If port doesn't exist in ovsdb, lets ensure that there are no
+            # leftovers
+            self.remove_port_filter(port)
         except exceptions.OVSFWTagNotFound as tag_not_found:
             LOG.info("Tag was not found for port %(port_id)s: %(err)s.",
                      {'port_id': port['device'],
@@ -890,6 +902,27 @@ class OVSFirewallDriver(firewall.FirewallDriver):
             actions='resubmit(,%d)' % ovs_consts.DROPPED_TRAFFIC_TABLE
         )
 
+        # Allow custom ethertypes
+        for permitted_ethertype in self.permitted_ethertypes:
+            if permitted_ethertype[:2] == '0x':
+                try:
+                    hex_ethertype = hex(int(permitted_ethertype, base=16))
+                    action = ('resubmit(,%d)' %
+                        ovs_consts.ACCEPTED_EGRESS_TRAFFIC_NORMAL_TABLE)
+                    self._add_flow(
+                        table=ovs_consts.BASE_EGRESS_TABLE,
+                        priority=95,
+                        dl_type=hex_ethertype,
+                        reg_port=port.ofport,
+                        actions=action
+                    )
+                    continue
+                except ValueError:
+                    pass
+            LOG.warning("Custom ethertype %(permitted_ethertype)s is not "
+                        "a hexadecimal number.",
+                        {'permitted_ethertype': permitted_ethertype})
+
         # Drop all remaining egress connections
         self._add_flow(
             table=ovs_consts.BASE_EGRESS_TABLE,
@@ -1006,25 +1039,6 @@ class OVSFirewallDriver(firewall.FirewallDriver):
             actions='output:{:d}'.format(port.ofport)
         )
 
-        # Allow custom ethertypes
-        for permitted_ethertype in self.permitted_ethertypes:
-            if permitted_ethertype[:2] == '0x':
-                try:
-                    hex_ethertype = hex(int(permitted_ethertype, base=16))
-                    self._add_flow(
-                        table=ovs_consts.BASE_INGRESS_TABLE,
-                        priority=100,
-                        dl_type=hex_ethertype,
-                        reg_port=port.ofport,
-                        actions='output:{:d}'.format(port.ofport)
-                    )
-                    continue
-                except ValueError:
-                    pass
-            LOG.warning("Custom ethertype %(permitted_ethertype)s is not "
-                        "a hexadecimal number.",
-                        {'permitted_ethertype': permitted_ethertype})
-
         self._initialize_ingress_ipv6_icmp(port)
 
         # DHCP offers
@@ -1130,6 +1144,13 @@ class OVSFirewallDriver(firewall.FirewallDriver):
                                                rule['remote_group_id'],
                                                direction, ethertype,
                                                priority_offset)
+            LOG.debug("Created conjunction %(conj_id)s for SG %(sg_id)s "
+                      "referencing remote SG ID %(remote_sg_id)s on port "
+                      "%(port_id)s.",
+                      {'conj_id': conj_id,
+                       'sg_id': sec_group_id,
+                       'remote_sg_id': rule['remote_group_id'],
+                       'port_id': port.id})
 
             rule1 = rule.copy()
             del rule1['remote_group_id']

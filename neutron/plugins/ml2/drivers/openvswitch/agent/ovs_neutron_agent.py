@@ -198,6 +198,10 @@ class OVSNeutronAgent(l2population_rpc.L2populationRpcCallBackTunnelMixin,
                                       br_set)
         self.rp_inventory_defaults = place_utils.parse_rp_inventory_defaults(
             ovs_conf.resource_provider_inventory_defaults)
+        self.rp_hypervisors = utils.default_rp_hypervisors(
+            ovs_conf.resource_provider_hypervisors,
+            {k: [v] for k, v in self.bridge_mappings.items()}
+        )
 
         self.setup_physical_bridges(self.bridge_mappings)
         self.vlan_manager = vlanmanager.LocalVlanManager()
@@ -243,7 +247,8 @@ class OVSNeutronAgent(l2population_rpc.L2populationRpcCallBackTunnelMixin,
             self.patch_tun_ofport,
             host,
             self.enable_tunneling,
-            self.enable_distributed_routing)
+            self.enable_distributed_routing,
+            self.arp_responder_enabled)
 
         if self.enable_distributed_routing:
             self.dvr_agent.setup_dvr_flows()
@@ -290,6 +295,8 @@ class OVSNeutronAgent(l2population_rpc.L2populationRpcCallBackTunnelMixin,
                                c_const.RP_BANDWIDTHS: self.rp_bandwidths,
                                c_const.RP_INVENTORY_DEFAULTS:
                                    self.rp_inventory_defaults,
+                               'resource_provider_hypervisors':
+                               self.rp_hypervisors,
                                'integration_bridge':
                                ovs_conf.integration_bridge,
                                'tunnel_types': self.tunnel_types,
@@ -908,14 +915,17 @@ class OVSNeutronAgent(l2population_rpc.L2populationRpcCallBackTunnelMixin,
                 cur_info = info_by_port[port.port_name]
             except KeyError:
                 continue
+            str_vlan = str(lvm.vlan)
             other_config = cur_info['other_config']
             if (cur_info['tag'] != lvm.vlan or
-                    other_config.get('tag') != lvm.vlan):
-                other_config['tag'] = str(lvm.vlan)
+                    other_config.get('tag') != str_vlan):
+                other_config['tag'] = str_vlan
                 self.int_br.set_db_attribute(
                     "Port", port.port_name, "other_config", other_config)
                 # Uninitialized port has tag set to []
                 if cur_info['tag']:
+                    LOG.warning("Uninstall flows of ofport %s due to "
+                                "local vlan change.", port.ofport)
                     self.int_br.uninstall_flows(in_port=port.ofport)
 
     def _bind_devices(self, need_binding_ports):

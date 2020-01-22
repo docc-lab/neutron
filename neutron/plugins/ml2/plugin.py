@@ -1054,8 +1054,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                 # removed in Queens when we populate all mtu attributes and
                 # enforce it's not nullable on database level
                     db_network.mtu is None):
-                db_network.mtu = self._get_network_mtu(db_network,
-                                                       validate=False)
+                db_network.mtu = self._get_network_mtu(db_network)
                 # agents should now update all ports to reflect new MTU
                 need_network_update_notify = True
 
@@ -1786,6 +1785,13 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         binding.router_id = attrs and attrs.get('device_id')
         # merge into session to reflect changes
         binding.persist_state_to_session(plugin_context.session)
+
+    def delete_distributed_port_bindings_by_router_id(self, context,
+                                                      router_id):
+        for binding in (context.session.query(models.DistributedPortBinding).
+                filter_by(router_id=router_id)):
+            db.clear_binding_levels(context, binding.port_id, binding.host)
+            context.session.delete(binding)
 
     @utils.transaction_guard
     @db_api.retry_if_session_inactive()

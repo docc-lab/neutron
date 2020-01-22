@@ -322,6 +322,11 @@ class TestGetCmdlineFromPid(base.BaseTestCase):
         expected_cmdline = ["python3", "test-binary", "test", "option"]
         self._test_cmdline(process_cmd, expected_cmdline)
 
+    def test_cmdline_with_single_argument(self):
+        process_cmd = "test-binary\0"
+        expected_cmdline = ["test-binary"]
+        self._test_cmdline(process_cmd, expected_cmdline)
+
     def test_no_process_running(self):
         self.process_is_running_mock.return_value = False
         mock_open = self.useFixture(
@@ -329,6 +334,16 @@ class TestGetCmdlineFromPid(base.BaseTestCase):
         ).mock_open
         cmdline = utils.get_cmdline_from_pid(self.pid)
         mock_open.assert_not_called()
+        self.assertEqual([], cmdline)
+
+    def test_cmdline_process_disappearing(self):
+        self.process_is_running_mock.return_value = True
+        mock_open = self.useFixture(
+            tools.OpenFixture('/proc/%s/cmdline' % self.pid, 'process')
+        ).mock_open
+        mock_open.side_effect = IOError()
+        cmdline = utils.get_cmdline_from_pid(self.pid)
+        mock_open.assert_called_once_with('/proc/%s/cmdline' % self.pid, 'r')
         self.assertEqual([], cmdline)
 
 

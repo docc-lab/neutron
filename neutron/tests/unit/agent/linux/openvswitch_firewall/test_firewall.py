@@ -302,6 +302,18 @@ class TestConjIPFlowManager(base.BaseTestCase):
         self.vlan_tag = 100
         self.conj_id = 16
 
+    def test_update_flows_for_vlan_no_ports(self):
+        remote_group = self.driver.sg_port_map.get_sg.return_value
+        remote_group.ports = {}
+        with mock.patch.object(self.manager.conj_id_map,
+                               'get_conj_id') as get_conj_id_mock:
+            get_conj_id_mock.return_value = self.conj_id
+            self.manager.add(self.vlan_tag, 'sg', 'remote_id',
+                             constants.INGRESS_DIRECTION, constants.IPv4, 0)
+            self.manager.update_flows_for_vlan(self.vlan_tag)
+        self.assertFalse(remote_group.get_ethertype_filtered_addresses.called)
+        self.assertFalse(self.driver._add_flow.called)
+
     def test_update_flows_for_vlan(self):
         remote_group = self.driver.sg_port_map.get_sg.return_value
         remote_group.get_ethertype_filtered_addresses.return_value = [
@@ -630,6 +642,16 @@ class TestOVSFirewallDriver(base.BaseTestCase):
         with self.firewall.defer_apply():
             self.firewall.update_port_filter(port_dict)
         self.assertEqual(2, self.mock_bridge.apply_flows.call_count)
+
+    def test_update_port_filter_clean_when_port_not_found(self):
+        """Check flows are cleaned if port is not found in the bridge."""
+        port_dict = {'device': 'port-id',
+                     'security_groups': [1]}
+        self._prepare_security_group()
+        self.firewall.prepare_port_filter(port_dict)
+        self.mock_bridge.br.get_vif_port_by_id.return_value = None
+        self.firewall.update_port_filter(port_dict)
+        self.assertTrue(self.mock_bridge.br.delete_flows.called)
 
     def test_remove_port_filter(self):
         port_dict = {'device': 'port-id',
